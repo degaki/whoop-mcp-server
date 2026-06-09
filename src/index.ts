@@ -1,7 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, ErrorCode, McpError, isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import express, { type Request, type Response } from 'express';
 import { WhoopClient } from './whoop-client.js';
 import { WhoopDatabase } from './database.js';
@@ -416,7 +416,7 @@ async function main(): Promise<void> {
 					const session = transports.get(sessionId)!;
 					session.lastAccess = Date.now();
 					transport = session.transport;
-				} else {
+				} else if (!sessionId && isInitializeRequest(req.body)) {
 					transport = new StreamableHTTPServerTransport({
 						sessionIdGenerator: () => crypto.randomUUID(),
 						onsessioninitialized: newSessionId => {
@@ -426,6 +426,16 @@ async function main(): Promise<void> {
 
 					const server = createMcpServer();
 					await server.connect(transport);
+				} else {
+					// Unknown session id (e.g. server restarted and wiped sessions),
+					// or a non-initialize request without a session. Tell the client to
+					// re-initialize; per the MCP spec it will start a fresh session.
+					res.status(404).json({
+						jsonrpc: '2.0',
+						error: { code: -32001, message: 'Session not found. Please reinitialize.' },
+						id: null,
+					});
+					return;
 				}
 
 				await transport.handleRequest(req, res, req.body);
