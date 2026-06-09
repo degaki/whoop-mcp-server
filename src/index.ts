@@ -24,7 +24,7 @@ const config = {
 	mcpSecret: process.env.MCP_SECRET ?? '',
 	ownerPassword: process.env.AUTH_PASSWORD ?? process.env.MCP_SECRET ?? '',
 	publicUrl: process.env.PUBLIC_URL ?? '',
-	displayTz: process.env.DISPLAY_TZ ?? 'America/Sao_Paulo',
+	displayTzOffsetMin: Number.parseInt(process.env.DISPLAY_TZ_OFFSET_MIN ?? '-180', 10),
 };
 
 const db = new WhoopDatabase(config.dbPath);
@@ -73,11 +73,13 @@ function formatDate(isoString: string): string {
 }
 
 function formatTime(isoString: string): string {
-	return new Date(isoString).toLocaleTimeString('pt-BR', {
-		hour: '2-digit',
-		minute: '2-digit',
-		timeZone: config.displayTz,
-	});
+	// Sao Paulo is a stable UTC-3 (Brazil dropped DST in 2019), so apply a fixed
+	// offset manually instead of relying on Intl named-timezone data, which is not
+	// reliably present in slim runtimes.
+	const local = new Date(new Date(isoString).getTime() + config.displayTzOffsetMin * 60_000);
+	const hh = String(local.getUTCHours()).padStart(2, '0');
+	const mm = String(local.getUTCMinutes()).padStart(2, '0');
+	return `${hh}:${mm}`;
 }
 
 function getRecoveryZone(score: number): string {
