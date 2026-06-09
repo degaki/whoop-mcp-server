@@ -24,6 +24,7 @@ const config = {
 	mcpSecret: process.env.MCP_SECRET ?? '',
 	ownerPassword: process.env.AUTH_PASSWORD ?? process.env.MCP_SECRET ?? '',
 	publicUrl: process.env.PUBLIC_URL ?? '',
+	displayTz: process.env.DISPLAY_TZ ?? 'America/Sao_Paulo',
 };
 
 const db = new WhoopDatabase(config.dbPath);
@@ -68,6 +69,14 @@ function formatDate(isoString: string): string {
 		weekday: 'short',
 		month: 'short',
 		day: 'numeric',
+	});
+}
+
+function formatTime(isoString: string): string {
+	return new Date(isoString).toLocaleTimeString('pt-BR', {
+		hour: '2-digit',
+		minute: '2-digit',
+		timeZone: config.displayTz,
 	});
 }
 
@@ -197,6 +206,8 @@ function createMcpServer(): Server {
 					if (sleep) {
 						const totalSleep = (sleep.total_in_bed_milli ?? 0) - (sleep.total_awake_milli ?? 0);
 						response += `## Last Night's Sleep\n`;
+						response += `- **Bedtime**: ${formatTime(sleep.start_time)}\n`;
+						response += `- **Wake time**: ${formatTime(sleep.end_time)}\n`;
 						response += `- **Total Sleep**: ${formatDuration(totalSleep)}\n`;
 						response += `- **Performance**: ${sleep.sleep_performance?.toFixed(0) ?? 'N/A'}%\n`;
 						response += `- **Efficiency**: ${sleep.sleep_efficiency?.toFixed(0) ?? 'N/A'}%\n`;
