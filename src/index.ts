@@ -6,6 +6,8 @@ import express, { type Request, type Response } from 'express';
 import { WhoopClient } from './whoop-client.js';
 import { WhoopDatabase } from './database.js';
 import { WhoopSync } from './sync.js';
+import { mountOAuth } from './oauth.js';
+import { createSqliteStore } from './oauth-store.js';
 
 interface ToolArguments {
 	days?: number;
@@ -20,6 +22,8 @@ const config = {
 	port: Number.parseInt(process.env.PORT ?? '3000', 10),
 	mode: process.env.MCP_MODE ?? 'http',
 	mcpSecret: process.env.MCP_SECRET ?? '',
+	ownerPassword: process.env.AUTH_PASSWORD ?? process.env.MCP_SECRET ?? '',
+	publicUrl: process.env.PUBLIC_URL ?? '',
 };
 
 const db = new WhoopDatabase(config.dbPath);
@@ -341,15 +345,24 @@ async function main(): Promise<void> {
 		await server.connect(transport);
 		process.stderr.write('Whoop MCP server running on stdio\n');
 	} else {
-		if (!config.mcpSecret) {
+		if (!config.ownerPassword) {
 			throw new Error(
-				'MCP_SECRET nao definido. Recusando iniciar um endpoint /mcp publico sem autenticacao. ' +
-					'Defina a variavel de ambiente MCP_SECRET com um valor longo e aleatorio.',
+				'AUTH_PASSWORD (ou MCP_SECRET) nao definido. Recusando iniciar um endpoint /mcp publico sem ' +
+					'autenticacao. Defina AUTH_PASSWORD com um valor longo e aleatorio (a senha que voce digitara ' +
+					'ao conectar o Claude).',
 			);
 		}
 
 		const app = express();
 		app.use(express.json());
+
+		const store = createSqliteStore(config.dbPath);
+		const { requireBearer } = mountOAuth(app, {
+			store,
+			ownerPassword: config.ownerPassword,
+			publicUrl: config.publicUrl,
+			resourcePath: '/mcp',
+		});
 
 		app.get('/callback', async (req: Request, res: Response) => {
 			const code = req.query.code as string | undefined;
@@ -372,12 +385,7 @@ async function main(): Promise<void> {
 			res.json({ status: 'ok', authenticated: Boolean(db.getTokens()) });
 		});
 
-		app.all('/mcp/:secret', async (req: Request, res: Response) => {
-			if (req.params.secret !== config.mcpSecret) {
-				res.status(404).send('Not found');
-				return;
-			}
-
+		app.all('/mcp', requireBearer, async (req: Request, res: Response) => {
 			const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
 			if (req.method === 'DELETE' && sessionId && transports.has(sessionId)) {
