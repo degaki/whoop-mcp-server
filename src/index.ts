@@ -415,7 +415,14 @@ async function main(): Promise<void> {
 					await server.connect(transport);
 				}
 
-				await transport.handleRequest(req, res);
+				await transport.handleRequest(req, res, req.body);
+				return;
+			}
+
+			if (req.method === 'GET' && sessionId && transports.has(sessionId)) {
+				const session = transports.get(sessionId)!;
+				session.lastAccess = Date.now();
+				await session.transport.handleRequest(req, res);
 				return;
 			}
 
