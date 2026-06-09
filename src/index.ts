@@ -19,6 +19,7 @@ const config = {
 	dbPath: process.env.DB_PATH ?? './whoop.db',
 	port: Number.parseInt(process.env.PORT ?? '3000', 10),
 	mode: process.env.MCP_MODE ?? 'http',
+	mcpSecret: process.env.MCP_SECRET ?? '',
 };
 
 const db = new WhoopDatabase(config.dbPath);
@@ -340,6 +341,13 @@ async function main(): Promise<void> {
 		await server.connect(transport);
 		process.stderr.write('Whoop MCP server running on stdio\n');
 	} else {
+		if (!config.mcpSecret) {
+			throw new Error(
+				'MCP_SECRET nao definido. Recusando iniciar um endpoint /mcp publico sem autenticacao. ' +
+					'Defina a variavel de ambiente MCP_SECRET com um valor longo e aleatorio.',
+			);
+		}
+
 		const app = express();
 		app.use(express.json());
 
@@ -364,7 +372,12 @@ async function main(): Promise<void> {
 			res.json({ status: 'ok', authenticated: Boolean(db.getTokens()) });
 		});
 
-		app.all('/mcp', async (req: Request, res: Response) => {
+		app.all('/mcp/:secret', async (req: Request, res: Response) => {
+			if (req.params.secret !== config.mcpSecret) {
+				res.status(404).send('Not found');
+				return;
+			}
+
 			const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
 			if (req.method === 'DELETE' && sessionId && transports.has(sessionId)) {
