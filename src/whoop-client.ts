@@ -83,7 +83,21 @@ export class WhoopClient {
 		return tokens;
 	}
 
+	// Single-flight: coalesce concurrent refreshes so we never send a rotated
+	// (already-invalidated) refresh token twice and trip WHOOP's reuse detection.
+	private refreshPromise: Promise<void> | null = null;
+
 	private async refreshTokens(): Promise<void> {
+		if (this.refreshPromise) {
+			return this.refreshPromise;
+		}
+		this.refreshPromise = this.doRefresh().finally(() => {
+			this.refreshPromise = null;
+		});
+		return this.refreshPromise;
+	}
+
+	private async doRefresh(): Promise<void> {
 		if (!this.tokens?.refresh_token) {
 			throw new Error('No refresh token available');
 		}
@@ -96,6 +110,9 @@ export class WhoopClient {
 				refresh_token: this.tokens.refresh_token,
 				client_id: this.clientId,
 				client_secret: this.clientSecret,
+				// WHOOP requires offline on refresh too, otherwise the response may
+				// come back WITHOUT a new refresh_token and the next refresh dies.
+				scope: 'offline',
 			}),
 		});
 
@@ -103,7 +120,14 @@ export class WhoopClient {
 			throw new Error(`Token refresh failed: ${await response.text()}`);
 		}
 
-		const data = await response.json() as { access_token: string; refresh_token: string; expires_in: number };
+		const data = await response.json() as { access_token: string; refresh_token?: string; expires_in: number };
+
+		// Fail loud instead of persisting an undefined refresh_token (which would
+		// poison the DB and force a manual re-auth next time).
+		if (!data.refresh_token) {
+			throw new Error('Refresh response missing refresh_token (check offline scope / WHOOP app config)');
+		}
+
 		this.tokens = {
 			access_token: data.access_token,
 			refresh_token: data.refresh_token,

@@ -169,6 +169,7 @@ function createMcpServer(): Server {
 		const { name, arguments: args } = request.params;
 		const typedArgs = (args ?? {}) as ToolArguments;
 
+		let syncError: string | null = null;
 		try {
 			const dataTools = ['get_today', 'get_recovery_trends', 'get_sleep_analysis', 'get_strain_history'];
 			if (dataTools.includes(name)) {
@@ -179,8 +180,11 @@ function createMcpServer(): Server {
 				client.setTokens(tokens);
 				try {
 					await sync.smartSync();
-				} catch {
-					// Continue with cached data
+				} catch (e) {
+					// Sync failed (e.g. WHOOP token refresh died) — fall back to cached
+					// data, but remember the error so we can warn the user instead of
+					// passing stale numbers off as fresh.
+					syncError = e instanceof Error ? e.message : String(e);
 				}
 			}
 
@@ -195,6 +199,10 @@ function createMcpServer(): Server {
 					}
 
 					let response = "# Today's Whoop Summary\n\n";
+
+					if (syncError) {
+						response = `⚠️ **Sync falhou — os dados abaixo podem estar desatualizados (cache).**\nErro: ${syncError}\n_Se persistir, rode \`get_auth_url\` e reautorize._\n\n` + response;
+					}
 
 					if (recovery) {
 						response += `## Recovery: ${recovery.recovery_score ?? 'N/A'}% ${recovery.recovery_score ? getRecoveryZone(recovery.recovery_score) : ''}\n`;
