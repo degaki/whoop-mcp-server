@@ -108,6 +108,13 @@ function validateBoolean(value: unknown): boolean {
 	return false;
 }
 
+function sportName(id: number): string {
+	// WHOOP identifies sports by numeric id. We intentionally do NOT hardcode a
+	// name table to avoid showing wrong labels; the id is shown as-is and can be
+	// mapped later from the official WHOOP sport reference if desired.
+	return `Esporte ${id}`;
+}
+
 function createMcpServer(): Server {
 	const server = new Server(
 		{ name: 'whoop-mcp-server', version: '1.0.0' },
@@ -149,6 +156,29 @@ function createMcpServer(): Server {
 				},
 			},
 			{
+				name: 'get_workouts',
+				description: 'List individual workouts (sport, duration, strain, heart rate, calories) over a period.',
+				inputSchema: {
+					type: 'object',
+					properties: { days: { type: 'number', description: 'Number of days to analyze (default: 14, max: 90)' } },
+					required: [],
+				},
+			},
+			{
+				name: 'get_cycles',
+				description: 'List daily physiological cycles (strain, average/max heart rate, calories) over a period.',
+				inputSchema: {
+					type: 'object',
+					properties: { days: { type: 'number', description: 'Number of days to analyze (default: 14, max: 90)' } },
+					required: [],
+				},
+			},
+			{
+				name: 'get_body_measurement',
+				description: 'Get the latest body measurements: height, weight, and max heart rate.',
+				inputSchema: { type: 'object', properties: {}, required: [] },
+			},
+			{
 				name: 'sync_data',
 				description: 'Manually trigger a data sync from Whoop.',
 				inputSchema: {
@@ -171,7 +201,7 @@ function createMcpServer(): Server {
 
 		let syncError: string | null = null;
 		try {
-			const dataTools = ['get_today', 'get_recovery_trends', 'get_sleep_analysis', 'get_strain_history'];
+			const dataTools = ['get_today', 'get_recovery_trends', 'get_sleep_analysis', 'get_strain_history', 'get_workouts', 'get_cycles'];
 			if (dataTools.includes(name)) {
 				const tokens = db.getTokens();
 				if (!tokens) {
@@ -305,6 +335,67 @@ function createMcpServer(): Server {
 
 					response += `\n## Averages\n- **Daily Strain**: ${avgStrain.toFixed(1)}\n- **Daily Calories**: ${Math.round(avgCalories)} kcal\n`;
 
+					return { content: [{ type: 'text', text: response }] };
+				}
+
+				case 'get_workouts': {
+					const days = validateDays(typedArgs.days);
+					const end = new Date().toISOString();
+					const start = new Date(Date.now() - days * 86400000).toISOString();
+					const workouts = db.getWorkoutsByDateRange(start, end);
+
+					if (workouts.length === 0) {
+						return { content: [{ type: 'text', text: 'No workouts found for the requested period.' }] };
+					}
+
+					let response = `# Workouts (Last ${days} Days)\n\n`;
+					response += '| Date | Sport | Duration | Strain | Avg HR | Max HR | Calories |\n';
+					response += '|------|-------|----------|--------|--------|--------|----------|\n';
+
+					for (const w of workouts) {
+						const durMs = new Date(w.end_time).getTime() - new Date(w.start_time).getTime();
+						const cals = w.kilojoule != null ? `${Math.round(w.kilojoule / 4.184)} kcal` : 'N/A';
+						response += `| ${formatDate(w.start_time)} ${formatTime(w.start_time)} | ${w.sport_name ?? sportName(w.sport_id)} | ${formatDuration(durMs)} | ${w.strain?.toFixed(1) ?? 'N/A'} | ${w.avg_hr ?? 'N/A'} | ${w.max_hr ?? 'N/A'} | ${cals} |\n`;
+					}
+
+					response += `\n**Total**: ${workouts.length} workouts\n`;
+					return { content: [{ type: 'text', text: response }] };
+				}
+
+				case 'get_cycles': {
+					const days = validateDays(typedArgs.days);
+					const end = new Date().toISOString();
+					const start = new Date(Date.now() - days * 86400000).toISOString();
+					const cycles = db.getCyclesByDateRange(start, end);
+
+					if (cycles.length === 0) {
+						return { content: [{ type: 'text', text: 'No cycles found for the requested period.' }] };
+					}
+
+					let response = `# Daily Cycles (Last ${days} Days)\n\n`;
+					response += '| Date | Strain | Avg HR | Max HR | Calories |\n';
+					response += '|------|--------|--------|--------|----------|\n';
+
+					for (const c of cycles) {
+						const cals = c.kilojoule != null ? `${Math.round(c.kilojoule / 4.184)} kcal` : 'N/A';
+						response += `| ${formatDate(c.start_time)} | ${c.strain?.toFixed(1) ?? 'N/A'} | ${c.avg_hr ?? 'N/A'} | ${c.max_hr ?? 'N/A'} | ${cals} |\n`;
+					}
+
+					return { content: [{ type: 'text', text: response }] };
+				}
+
+				case 'get_body_measurement': {
+					const tokens = db.getTokens();
+					if (!tokens) {
+						return { content: [{ type: 'text', text: 'Not authenticated with Whoop. Use get_auth_url to authorize first.' }] };
+					}
+					client.setTokens(tokens);
+
+					const body = await client.getBodyMeasurement();
+					let response = '# Body Measurement\n';
+					response += `- **Height**: ${(body.height_meter * 100).toFixed(0)} cm\n`;
+					response += `- **Weight**: ${body.weight_kilogram.toFixed(1)} kg\n`;
+					response += `- **Max HR**: ${body.max_heart_rate} bpm\n`;
 					return { content: [{ type: 'text', text: response }] };
 				}
 

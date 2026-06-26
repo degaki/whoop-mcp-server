@@ -127,6 +127,7 @@ export class WhoopDatabase {
 				id TEXT PRIMARY KEY,
 				user_id INTEGER NOT NULL,
 				sport_id INTEGER NOT NULL,
+				sport_name TEXT,
 				start_time TEXT NOT NULL,
 				end_time TEXT NOT NULL,
 				score_state TEXT NOT NULL,
@@ -150,6 +151,14 @@ export class WhoopDatabase {
 
 			INSERT OR IGNORE INTO sync_state (id) VALUES (1);
 		`);
+
+		// Migration for databases created before sport_name existed.
+		// SQLite has no "ADD COLUMN IF NOT EXISTS", so we try and ignore if present.
+		try {
+			this.db.exec('ALTER TABLE workouts ADD COLUMN sport_name TEXT');
+		} catch {
+			// Column already exists — nothing to do.
+		}
 	}
 
 	saveTokens(tokens: WhoopTokens): void {
@@ -298,11 +307,11 @@ export class WhoopDatabase {
 	upsertWorkouts(workouts: WhoopWorkout[]): void {
 		const stmt = this.db.prepare(`
 			INSERT OR REPLACE INTO workouts (
-				id, user_id, sport_id, start_time, end_time, score_state,
+				id, user_id, sport_id, sport_name, start_time, end_time, score_state,
 				strain, avg_hr, max_hr, kilojoule,
 				zone_zero_milli, zone_one_milli, zone_two_milli, zone_three_milli, zone_four_milli, zone_five_milli,
 				synced_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		`);
 
 		const insertMany = this.db.transaction((items: WhoopWorkout[]) => {
@@ -311,6 +320,7 @@ export class WhoopDatabase {
 					w.id,
 					w.user_id,
 					w.sport_id,
+					w.sport_name ?? null,
 					w.start,
 					w.end,
 					w.score_state,

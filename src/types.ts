@@ -92,6 +92,7 @@ export interface WhoopWorkout {
 	end: string;
 	timezone_offset: string;
 	sport_id: number;
+	sport_name?: string;
 	score_state: 'SCORED' | 'PENDING_SCORE' | 'UNSCORABLE';
 	score?: {
 		strain: number;
@@ -169,6 +170,7 @@ export interface DbWorkout {
 	id: string;
 	user_id: number;
 	sport_id: number;
+	sport_name: string | null;
 	start_time: string;
 	end_time: string;
 	score_state: string;
